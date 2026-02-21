@@ -62,10 +62,28 @@ class ObsidianClient:
                 )
                 response.raise_for_status()
                 data = response.json()
+                
+                # Try multiple possible field names for Obsidian version
+                obsidian_version = (
+                    data.get("obsidianVersion") 
+                    or data.get("obsidian") 
+                    or data.get("version")
+                    or data.get("appVersion")
+                )
+                
+                # Try multiple possible field names for plugin version
+                plugin_version = (
+                    data.get("pluginVersion")
+                    or data.get("plugin")
+                    or data.get("apiVersion")
+                    or data.get("restApiVersion")
+                )
+                
                 return {
                     "connected": True,
-                    "obsidian_version": data.get("obsidianVersion"),
-                    "plugin_version": data.get("pluginVersion"),
+                    "obsidian_version": obsidian_version,
+                    "plugin_version": plugin_version,
+                    "raw_response": data,  # Include full response for debugging
                 }
         except Exception as e:
             return {
