@@ -132,6 +132,24 @@ async def openapi_spec():
 
 
 @app.get(
+    "//openapi.json",
+    include_in_schema=False,
+)
+async def openapi_spec_double_slash():
+    """
+    Handle double slash URL (Open WebUI with trailing slash).
+    Redirects to the correct endpoint.
+    """
+    from fastapi.openapi.utils import get_openapi
+    return get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+
+@app.get(
     "/health",
     response_model=HealthResponse,
     summary="Health check",
