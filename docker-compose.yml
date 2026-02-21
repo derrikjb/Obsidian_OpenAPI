@@ -1,0 +1,83 @@
+# Obsidian OpenAPI Server - Docker Compose
+# 
+# Usage:
+#   docker-compose up -d           # Start in background
+#   docker-compose up              # Start with logs
+#   docker-compose down            # Stop
+#   docker-compose logs -f         # Follow logs
+
+version: "3.8"
+
+services:
+  obsidian-openapi-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: obsidian-openapi-server
+    
+    ports:
+      - "${OBSIDIAN_OPENAPI_PORT:-27150}:27150"
+    
+    environment:
+      # Server Configuration
+      - OBSIDIAN_OPENAPI_PORT=${OBSIDIAN_OPENAPI_PORT:-27150}
+      - OBSIDIAN_OPENAPI_HOST=0.0.0.0
+      
+      # Obsidian Connection (REQUIRED - set these in .env file)
+      - OBSIDIAN_API_URL=${OBSIDIAN_API_URL:-http://host.docker.internal:27123}
+      - OBSIDIAN_API_KEY=${OBSIDIAN_API_KEY}
+      
+      # Server Security
+      - SERVER_API_KEY=${SERVER_API_KEY}
+      
+      # Optional Configuration
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - MAX_HISTORY_ENTRIES=${MAX_HISTORY_ENTRIES:-10}
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      - ENABLE_KEY_REGENERATION=${ENABLE_KEY_REGENERATION:-false}
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:27150/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 128M
+    
+    # Persistent storage for history
+    volumes:
+      - ./.history:/app/.history
+    
+    # Network configuration
+    # If running Obsidian on the host, use host.docker.internal
+    # If running Obsidian in another container, use that container's network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Optional: Add a reverse proxy (nginx) for production
+#   nginx:
+#     image: nginx:alpine
+#     ports:
+#       - "80:80"
+#       - "443:443"
+#     volumes:
+#       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+#       - ./ssl:/etc/nginx/ssl:ro
+#     depends_on:
+#       - obsidian-openapi-server
+#     restart: unless-stopped
