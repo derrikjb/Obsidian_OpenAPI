@@ -63,20 +63,24 @@ class ObsidianClient:
                 response.raise_for_status()
                 data = response.json()
                 
-                # Try multiple possible field names for Obsidian version
+                # Get versions from nested 'versions' object or top level
+                versions = data.get("versions", {})
+                
+                # Try nested versions first, then top level
                 obsidian_version = (
-                    data.get("obsidianVersion") 
+                    versions.get("obsidian")
+                    or data.get("obsidianVersion") 
                     or data.get("obsidian") 
                     or data.get("version")
-                    or data.get("appVersion")
                 )
                 
-                # Try multiple possible field names for plugin version
+                # Plugin version is 'self' in the Obsidian API
                 plugin_version = (
-                    data.get("pluginVersion")
+                    versions.get("self")
+                    or versions.get("plugin")
+                    or data.get("pluginVersion")
                     or data.get("plugin")
                     or data.get("apiVersion")
-                    or data.get("restApiVersion")
                 )
                 
                 return {

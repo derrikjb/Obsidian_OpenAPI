@@ -56,5 +56,8 @@ Thumbs.db
 .history/
 backups/
 
+# Obsidian API reference (local copy)
+obsidian_openapi.yaml
+
 # Docker
 .dockerignore

@@ -104,6 +104,33 @@ app.include_router(directory_router)
 app.include_router(search_router)
 
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """Log all incoming requests for debugging."""
+    logger.debug(f"Incoming request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    logger.debug(f"Response: {response.status_code}")
+    return response
+
+
+@app.get(
+    "/openapi.json",
+    include_in_schema=False,
+)
+async def openapi_spec():
+    """
+    Serve OpenAPI spec without authentication.
+    Required for Open WebUI to discover tools.
+    """
+    from fastapi.openapi.utils import get_openapi
+    return get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+
 @app.get(
     "/health",
     response_model=HealthResponse,
