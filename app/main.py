@@ -99,9 +99,10 @@ app.add_middleware(
 )
 
 # Include routers (no prefix - routers define full paths)
-app.include_router(vault_router)
-app.include_router(directory_router)
+# Order matters: more specific routes must be registered before wildcard routes
+app.include_router(directory_router)  # /vault/ must come before /vault/{path}
 app.include_router(search_router)
+app.include_router(vault_router)  # /vault/{path:path} is a catch-all
 
 
 @app.middleware("http")
