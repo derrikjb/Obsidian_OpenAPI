@@ -125,7 +125,11 @@ async def create_file(
 @router.patch(
     "/vault/{path:path}",
     summary="Patch file content",
-    description="Partially update a file (heading, block, frontmatter, or content).",
+    description="""Partially update a file by inserting content at a specific location.
+    
+    This operation allows you to modify a file without rewriting the entire content.
+    You can append, prepend, or replace content relative to headings, block references, or frontmatter fields.
+    """,
 )
 async def patch_file(
     path: str,
@@ -135,10 +139,59 @@ async def patch_file(
     """
     Partially update a file without rewriting the entire content.
     
-    - **operation**: append, prepend, or replace
-    - **target**: heading, block, frontmatter, or content
-    - **target_value**: Identifier (heading path, block ID, frontmatter key, or content selector)
-    - **content**: New content to insert
+    ## Target Types
+    
+    The Obsidian API supports three target types for patch operations:
+    
+    - **heading**: Target a specific heading in the document
+      - Use the heading text as `target_value` (e.g., "My Section" or "## My Section")
+      - For nested headings, use the full path (e.g., "Parent::Child::Grandchild")
+    
+    - **block**: Target a block reference
+      - Use the block ID as `target_value` (e.g., "block-id-123")
+      - Block IDs are typically formatted as `^block-id` in Obsidian
+    
+    - **frontmatter**: Target a frontmatter field
+      - Use the field name as `target_value` (e.g., "title", "tags", "date")
+      - Only works with YAML frontmatter at the top of the file
+    
+    ## Operations
+    
+    - **append**: Add content after the target
+    - **prepend**: Add content before the target
+    - **replace**: Replace the target content entirely
+    
+    ## Examples
+    
+    **Append after a heading:**
+    ```json
+    {
+      "operation": "append",
+      "target": "heading",
+      "target_value": "Notes",
+      "content": "\\n- New note item"
+    }
+    ```
+    
+    **Add to frontmatter:**
+    ```json
+    {
+      "operation": "replace",
+      "target": "frontmatter",
+      "target_value": "status",
+      "content": "completed"
+    }
+    ```
+    
+    **Append to a block:**
+    ```json
+    {
+      "operation": "append",
+      "target": "block",
+      "target_value": "meeting-notes",
+      "content": " Additional context here."
+    }
+    ```
     """
     if not path or path.endswith("/"):
         raise HTTPException(

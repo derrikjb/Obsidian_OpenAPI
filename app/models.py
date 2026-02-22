@@ -111,15 +111,27 @@ class FileAppendRequest(BaseModel):
 
 
 class FilePatchRequest(BaseModel):
-    """File patch request."""
+    """File patch request.
+    
+    Use this to partially update a file by appending, prepending, or replacing
+    content relative to a heading, block reference, or frontmatter field.
+    """
     operation: PatchOperation = Field(
-        ..., description="Type of patch operation"
+        ..., 
+        description="Operation to perform: 'append' (add after), 'prepend' (add before), or 'replace' (replace target)"
     )
-    target: PatchTarget = Field(..., description="What to patch")
+    target: PatchTarget = Field(
+        ..., 
+        description="Type of target: 'heading' (section), 'block' (block reference), or 'frontmatter' (YAML field)"
+    )
     target_value: str = Field(
-        ..., description="Target identifier (heading path, block ID, or frontmatter key)"
+        ..., 
+        description="Identifier for the target: heading text (e.g., 'Notes'), block ID (e.g., 'abc123'), or frontmatter key (e.g., 'status')"
     )
-    content: str = Field(..., description="Content to insert")
+    content: str = Field(
+        ..., 
+        description="Content to insert. For headings, include newline characters (e.g., '\\n- New item')"
+    )
     
     @field_validator("content")
     @classmethod
