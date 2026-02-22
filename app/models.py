@@ -82,6 +82,15 @@ class FileCreateRequest(BaseModel):
     """File creation request."""
     content: str = Field(..., description="File content in markdown")
     overwrite: bool = Field(default=False, description="Overwrite if file exists")
+    
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        """Ensure content is always a string."""
+        if isinstance(v, (dict, list)):
+            import json
+            return json.dumps(v)
+        return str(v)
 
 
 class FileAppendRequest(BaseModel):
@@ -90,6 +99,15 @@ class FileAppendRequest(BaseModel):
     add_newline: bool = Field(
         default=True, description="Add newline before appending"
     )
+    
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        """Ensure content is always a string."""
+        if isinstance(v, (dict, list)):
+            import json
+            return json.dumps(v)
+        return str(v)
 
 
 class FilePatchRequest(BaseModel):
@@ -102,6 +120,15 @@ class FilePatchRequest(BaseModel):
         ..., description="Target identifier (heading path, block ID, or frontmatter key)"
     )
     content: str = Field(..., description="Content to insert")
+    
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        """Ensure content is always a string."""
+        if isinstance(v, (dict, list)):
+            import json
+            return json.dumps(v)
+        return str(v)
 
 
 # ==================== Search Models ====================
