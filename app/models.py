@@ -55,24 +55,20 @@ class ApiKeyResponse(BaseModel):
     message: str = "Keep this key secure. It will not be shown again."
 
 
-# ==================== File Models ====================
-
-class VaultFile(BaseModel):
-    """Vault file/directory entry."""
-    path: str
-    name: str
-    is_directory: bool
-    extension: Optional[str] = None
-    size: Optional[int] = None
-    modified: Optional[datetime] = None
-
+# ==================== Directory Models ====================
 
 class VaultDirectoryListing(BaseModel):
-    """Vault directory listing response."""
+    """Vault directory listing response.
+    
+    The Obsidian Local REST API returns a simple array of strings
+    where directories end with a trailing slash.
+    """
     path: str
-    files: List[VaultFile]
+    files: List[str]
     total: int
 
+
+# ==================== File Models ====================
 
 class FileContent(BaseModel):
     """File content response."""
@@ -110,22 +106,23 @@ class FilePatchRequest(BaseModel):
 
 # ==================== Search Models ====================
 
+class SearchMatch(BaseModel):
+    """Search match location."""
+    start: int
+    end: int
+
+
+class SearchMatchDetail(BaseModel):
+    """Search match with context."""
+    match: SearchMatch
+    context: str
+
+
 class SearchResult(BaseModel):
     """Search result item."""
-    path: str
+    filename: str = Field(..., description="Path to the matching file")
     score: float
-    context: Optional[str] = None
-    matches: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class SimpleSearchRequest(BaseModel):
-    """Simple text search request."""
-    query: str = Field(..., description="Search query")
-    path: Optional[str] = Field(
-        default=None, description="Limit search to specific path"
-    )
-    limit: int = Field(default=50, ge=1, le=1000)
-    context_length: int = Field(default=200, ge=50, le=1000)
+    matches: List[SearchMatchDetail]
 
 
 class SimpleSearchResponse(BaseModel):
@@ -133,7 +130,6 @@ class SimpleSearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
     total: int
-    search_time_ms: Optional[float] = None
 
 
 class AdvancedSearchRequest(BaseModel):
@@ -154,13 +150,18 @@ class AdvancedSearchRequest(BaseModel):
         return v
 
 
+class AdvancedSearchResult(BaseModel):
+    """Advanced search result item."""
+    filename: str = Field(..., description="Path to the matching file")
+    result: Union[str, int, float, bool, List[Any], Dict[str, Any]]
+
+
 class AdvancedSearchResponse(BaseModel):
     """Advanced search response."""
     query_type: SearchType
     query: Union[str, Dict[str, Any]]
-    results: List[Dict[str, Any]]
+    results: List[AdvancedSearchResult]
     total: int
-    search_time_ms: Optional[float] = None
 
 
 # ==================== History Models ====================

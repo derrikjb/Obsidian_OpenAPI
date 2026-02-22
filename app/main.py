@@ -98,7 +98,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# Include routers (no prefix - routers define full paths)
 app.include_router(vault_router)
 app.include_router(directory_router)
 app.include_router(search_router)

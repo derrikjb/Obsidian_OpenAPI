@@ -1,7 +1,5 @@
 """Obsidian REST API client."""
 
-import json
-import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -50,7 +48,28 @@ class ObsidianClient:
 
     def _encode_path(self, path: str) -> str:
         """URL-encode a vault path."""
-        return quote(path, safe="")
+        # Remove leading slash if present for encoding
+        path = path.lstrip("/")
+        return quote(path, safe="/")
+
+    def _normalize_directory_path(self, path: str) -> str:
+        """Normalize directory path for Obsidian API.
+        
+        The Obsidian API expects:
+        - Root: "/vault/" (trailing slash required)
+        - Subdirectory: "/vault/{path}/" (trailing slash required)
+        """
+        if not path or path == "/":
+            return "/vault/"
+        
+        # Remove leading slash if present
+        path = path.lstrip("/")
+        
+        # Ensure trailing slash
+        if not path.endswith("/"):
+            path += "/"
+        
+        return f"/vault/{path}"
 
     async def check_health(self) -> Dict[str, Any]:
         """Check connection to Obsidian API."""
@@ -87,7 +106,7 @@ class ObsidianClient:
                     "connected": True,
                     "obsidian_version": obsidian_version,
                     "plugin_version": plugin_version,
-                    "raw_response": data,  # Include full response for debugging
+                    "raw_response": data,
                 }
         except Exception as e:
             return {
@@ -102,15 +121,30 @@ class ObsidianClient:
     ) -> Dict[str, Any]:
         """Get file content."""
         self._ensure_client()
-        encoded_path = self._encode_path(path)
         
-        params = {}
-        if format_type == "json":
-            params["format"] = "json"
-        elif format_type == "document-map":
-            params["format"] = "content-map"
+        # Handle path normalization - files don't have trailing slash
+        path = path.lstrip("/")
+        encoded_path = self._encode_path(path)
 
-        response = await self._client.get(f"/vault/{encoded_path}", params=params)
+        # Build headers based on format
+        headers = {}
+        if format_type == "json":
+            headers["Accept"] = "application/vnd.olrapi.note+json"
+        elif format_type == "document-map":
+            headers["Accept"] = "application/vnd.olrapi.document-map+json"
+        else:
+            headers["Accept"] = "text/markdown"
+
+        try:
+            response = await self._client.get(
+                f"/vault/{encoded_path}",
+                headers=headers,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
         
         if response.status_code == 404:
             raise HTTPException(
@@ -120,14 +154,14 @@ class ObsidianClient:
         
         response.raise_for_status()
         
-        content = response.text
-        
-        # Try to parse as JSON if format is json
-        if format_type == "json":
+        # Return appropriate content based on format
+        if format_type in ["json", "document-map"]:
             try:
                 content = response.json()
-            except json.JSONDecodeError:
-                pass
+            except Exception:
+                content = response.text
+        else:
+            content = response.text
 
         return {
             "path": path,
@@ -140,27 +174,35 @@ class ObsidianClient:
     ) -> Dict[str, Any]:
         """Create or replace a file."""
         self._ensure_client()
+        
+        path = path.lstrip("/")
         encoded_path = self._encode_path(path)
 
-        if overwrite:
-            # Use PUT to overwrite
-            response = await self._client.put(
-                f"/vault/{encoded_path}",
-                content=content,
-                headers={"Content-Type": "text/markdown"},
-            )
-        else:
-            # Use POST to create (fails if exists)
-            response = await self._client.post(
-                f"/vault/{encoded_path}",
-                content=content,
-                headers={"Content-Type": "text/markdown"},
+        try:
+            if overwrite:
+                # Use PUT to overwrite
+                response = await self._client.put(
+                    f"/vault/{encoded_path}",
+                    content=content,
+                    headers={"Content-Type": "text/markdown"},
+                )
+            else:
+                # Use POST to create (fails if exists)
+                response = await self._client.post(
+                    f"/vault/{encoded_path}",
+                    content=content,
+                    headers={"Content-Type": "text/markdown"},
+                )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
             )
 
-        if response.status_code == 400 and not overwrite:
+        if response.status_code == 400:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"File already exists: {path}. Use overwrite=true to replace.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Bad request: {response.text}",
             )
 
         response.raise_for_status()
@@ -174,27 +216,21 @@ class ObsidianClient:
     async def append_to_file(self, path: str, content: str) -> Dict[str, Any]:
         """Append content to a file."""
         self._ensure_client()
+        
+        path = path.lstrip("/")
         encoded_path = self._encode_path(path)
 
-        # First, get current content if file exists
         try:
-            current = await self.get_file(path, "markdown")
-            current_content = current["content"]
-            if isinstance(current_content, str) and not current_content.endswith("\n"):
-                content = "\n" + content
-        except HTTPException:
-            # File doesn't exist, will create it
-            pass
-
-        response = await self._client.post(
-            f"/vault/{encoded_path}",
-            content=content,
-            headers={"Content-Type": "text/markdown"},
-        )
-
-        # If file doesn't exist, create it
-        if response.status_code == 404:
-            return await self.create_file(path, content, overwrite=False)
+            response = await self._client.post(
+                f"/vault/{encoded_path}",
+                content=content,
+                headers={"Content-Type": "text/markdown"},
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
 
         response.raise_for_status()
 
@@ -214,25 +250,39 @@ class ObsidianClient:
     ) -> Dict[str, Any]:
         """Patch a file (heading, block, frontmatter, or content)."""
         self._ensure_client()
+        
+        path = path.lstrip("/")
         encoded_path = self._encode_path(path)
 
-        # Build the patch body
-        patch_body = {
-            "operation": operation,  # append, prepend, replace
-            "target": target,  # heading, block, frontmatter, content
-            "targetValue": target_value,
-            "content": content,
+        # Build headers for patch operation
+        headers = {
+            "Operation": operation,
+            "Target-Type": target,
+            "Target": target_value,
         }
 
-        response = await self._client.patch(
-            f"/vault/{encoded_path}",
-            json=patch_body,
-        )
+        try:
+            response = await self._client.patch(
+                f"/vault/{encoded_path}",
+                content=content,
+                headers=headers,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
 
         if response.status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"File not found: {path}",
+            )
+        
+        if response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Bad request: {response.text}",
             )
 
         response.raise_for_status()
@@ -246,14 +296,28 @@ class ObsidianClient:
     async def delete_file(self, path: str) -> Dict[str, Any]:
         """Delete a file."""
         self._ensure_client()
+        
+        path = path.lstrip("/")
         encoded_path = self._encode_path(path)
 
-        response = await self._client.delete(f"/vault/{encoded_path}")
+        try:
+            response = await self._client.delete(f"/vault/{encoded_path}")
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
 
         if response.status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"File not found: {path}",
+            )
+        
+        if response.status_code == 405:
+            raise HTTPException(
+                status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+                detail=f"Cannot delete: path is a directory, not a file",
             )
 
         response.raise_for_status()
@@ -267,11 +331,23 @@ class ObsidianClient:
     # ==================== Directory Operations ====================
 
     async def list_directory(self, path: str = "/") -> Dict[str, Any]:
-        """List files and directories."""
+        """List files and directories.
+        
+        The Obsidian Local REST API returns {"files": [...]} where each item
+        is a string path. Directories end with a trailing slash.
+        """
         self._ensure_client()
-        encoded_path = self._encode_path(path)
+        
+        # Normalize the path for the API
+        api_path = self._normalize_directory_path(path)
 
-        response = await self._client.get(f"/vault/{encoded_path}")
+        try:
+            response = await self._client.get(api_path)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
 
         if response.status_code == 404:
             raise HTTPException(
@@ -281,18 +357,22 @@ class ObsidianClient:
 
         response.raise_for_status()
 
-        data = response.json()
-        files = []
-
-        for item in data.get("files", []):
-            files.append({
-                "path": item.get("path", ""),
-                "name": item.get("name", ""),
-                "is_directory": item.get("type") == "directory",
-                "extension": item.get("extension"),
-                "size": item.get("size"),
-                "modified": item.get("mtime"),
-            })
+        try:
+            data = response.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid JSON response from Obsidian API: {str(e)}",
+            )
+        
+        # Obsidian API returns {"files": ["file.md", "directory/", ...]}
+        files = data.get("files", [])
+        
+        if not isinstance(files, list):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid response format from Obsidian API: expected 'files' to be a list",
+            )
 
         return {
             "path": path,
@@ -303,86 +383,68 @@ class ObsidianClient:
     # ==================== Search Operations ====================
 
     async def simple_search(
-        self, query: str, path: Optional[str] = None, limit: int = 50
+        self, query: str, context_length: int = 100
     ) -> Dict[str, Any]:
-        """Perform a simple text search."""
+        """Perform a simple text search using the Obsidian API.
+        
+        Uses POST /search/simple/ endpoint.
+        """
         self._ensure_client()
 
-        # The Obsidian API doesn't have a built-in simple search endpoint
-        # We'll implement a basic search by listing files and searching content
-        # For production, you might want to use the Dataview plugin or implement indexing
-        
-        search_results = []
-        
+        params = {
+            "query": query,
+            "contextLength": context_length,
+        }
+
         try:
-            # Try using the Obsidian search endpoint if available
-            params = {"query": query, "limit": limit}
-            if path:
-                params["path"] = path
-                
-            response = await self._client.get("/search", params=params)
+            response = await self._client.post("/search/simple/", params=params)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
+        
+        if response.status_code == 404:
+            # Endpoint not available - try manual search as fallback
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Simple search endpoint not available in your Obsidian Local REST API version",
+            )
+
+        response.raise_for_status()
+
+        try:
+            data = response.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid JSON response from Obsidian API: {str(e)}",
+            )
+
+        # Transform response to match our model
+        results = []
+        for item in data:
+            matches = []
+            for match in item.get("matches", []):
+                matches.append({
+                    "match": {
+                        "start": match.get("match", {}).get("start", 0),
+                        "end": match.get("match", {}).get("end", 0),
+                    },
+                    "context": match.get("context", ""),
+                })
             
-            if response.status_code == 200:
-                data = response.json()
-                for result in data.get("results", []):
-                    search_results.append({
-                        "path": result.get("path", ""),
-                        "score": result.get("score", 0.0),
-                        "context": result.get("context"),
-                        "matches": result.get("matches", []),
-                    })
-            else:
-                # Fallback: search through files manually (slower)
-                search_results = await self._manual_search(query, path, limit)
-                
-        except Exception:
-            # Fallback to manual search
-            search_results = await self._manual_search(query, path, limit)
+            results.append({
+                "filename": item.get("filename", ""),
+                "score": item.get("score", 0.0),
+                "matches": matches,
+            })
 
         return {
             "query": query,
-            "results": search_results,
-            "total": len(search_results),
+            "results": results,
+            "total": len(results),
         }
-
-    async def _manual_search(
-        self, query: str, path: Optional[str], limit: int
-    ) -> List[Dict[str, Any]]:
-        """Manual search through files (fallback)."""
-        results = []
-        
-        # List all files
-        listing = await self.list_directory(path or "/")
-        files = [f for f in listing.get("files", []) if not f.get("is_directory")]
-        
-        query_lower = query.lower()
-        
-        for file_info in files[:100]:  # Limit to first 100 files for performance
-            try:
-                file_data = await self.get_file(file_info["path"], "markdown")
-                content = file_data.get("content", "")
-                
-                if isinstance(content, str) and query_lower in content.lower():
-                    # Find context around match
-                    idx = content.lower().find(query_lower)
-                    start = max(0, idx - 100)
-                    end = min(len(content), idx + len(query) + 100)
-                    context = content[start:end]
-                    
-                    results.append({
-                        "path": file_info["path"],
-                        "score": 1.0,
-                        "context": context,
-                        "matches": [{"start": idx, "end": idx + len(query)}],
-                    })
-                    
-                    if len(results) >= limit:
-                        break
-                        
-            except Exception:
-                continue
-        
-        return results
 
     async def advanced_search(
         self,
@@ -390,31 +452,69 @@ class ObsidianClient:
         query: Any,
         limit: int = 50,
     ) -> Dict[str, Any]:
-        """Perform an advanced search (Dataview DQL or JsonLogic)."""
+        """Perform an advanced search (Dataview DQL or JsonLogic).
+        
+        Uses POST /search/ endpoint.
+        """
         self._ensure_client()
 
-        search_body = {
-            "type": query_type,
-            "query": query,
-            "limit": limit,
-        }
+        # Determine content type based on query type
+        if query_type == "dataview":
+            content_type = "application/vnd.olrapi.dataview.dql+txt"
+            body = query if isinstance(query, str) else str(query)
+        elif query_type == "jsonlogic":
+            content_type = "application/vnd.olrapi.jsonlogic+json"
+            import json
+            body = json.dumps(query) if isinstance(query, dict) else str(query)
+        else:
+            content_type = "application/json"
+            body = str(query)
 
-        response = await self._client.post("/search", json=search_body)
+        try:
+            response = await self._client.post(
+                "/search/",
+                content=body,
+                headers={"Content-Type": content_type},
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to connect to Obsidian API: {str(e)}",
+            )
 
         if response.status_code == 404:
-            # Advanced search might not be available
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
                 detail="Advanced search endpoint not available. Ensure Dataview plugin is installed.",
             )
+        
+        if response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Bad request: {response.text}",
+            )
 
         response.raise_for_status()
 
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid JSON response from Obsidian API: {str(e)}",
+            )
+        
+        # Transform response to match our model
+        results = []
+        for item in data:
+            results.append({
+                "filename": item.get("filename", ""),
+                "result": item.get("result"),
+            })
         
         return {
             "query_type": query_type,
             "query": query,
-            "results": data.get("results", []),
-            "total": data.get("total", 0),
+            "results": results,
+            "total": len(results),
         }
