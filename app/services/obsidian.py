@@ -261,6 +261,13 @@ class ObsidianClient:
             "Target": target_value,
         }
 
+        # Ensure content is a string
+        if isinstance(content, (dict, list)):
+            import json
+            content = json.dumps(content)
+        else:
+            content = str(content)
+
         try:
             response = await self._client.patch(
                 f"/vault/{encoded_path}",

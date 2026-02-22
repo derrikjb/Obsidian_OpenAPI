@@ -2,7 +2,7 @@
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import verify_api_key
 from app.models import VaultDirectoryListing
@@ -18,7 +18,7 @@ router = APIRouter(tags=["Directory"])
     description="List files and directories in the vault root or a specific directory.",
 )
 async def list_directory(
-    path: str = "/",
+    path: str = Query(default="/", description="Directory path to list (use '/' for vault root)"),
     api_key: str = Depends(verify_api_key),
 ):
     """
